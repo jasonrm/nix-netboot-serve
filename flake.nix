@@ -2,7 +2,7 @@
   description = "nix-netboot-serve";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-22.11";
     cpiotools.url = "github:DeterminateSystems/cpiotools";
   };
 
@@ -15,15 +15,19 @@
     let
       nameValuePair = name: value: { inherit name value; };
       genAttrs = names: f: builtins.listToAttrs (map (n: nameValuePair n (f n)) names);
-      allSystems = [ "x86_64-linux" "aarch64-linux" "i686-linux" "x86_64-darwin" ];
+      allSystems = [ "x86_64-linux" "aarch64-linux" "i686-linux" "x86_64-darwin" "aarch64-darwin" ];
 
       forAllSystems = f: genAttrs allSystems (system: f {
         inherit system;
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = nixpkgs.legacyPackages.${system};
+        lib = nixpkgs.legacyPackages.${system}.lib;
       });
     in
     {
-      devShell = forAllSystems ({ system, pkgs, ... }: self.packages.${system}.package.overrideAttrs ({ nativeBuildInputs ? [ ], ... }: {
+      devShell = forAllSystems ({ system, pkgs, lib, ... }: self.packages.${system}.package.overrideAttrs ({ nativeBuildInputs ? [ ], ... }: {
+        buildInputs = lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
+          darwin.apple_sdk.frameworks.Security
+        ]);
         nativeBuildInputs = nativeBuildInputs ++ (with pkgs; [
           binwalk
           codespell
@@ -32,6 +36,8 @@
           nixpkgs-fmt
           rustfmt
           vim # xxd
+          
+        ] ++ lib.optionals pkgs.stdenv.isLinux [
           cpiotools.packages.${system}.package
         ]);
       }));
@@ -53,11 +59,16 @@
 
             buildInputs = with pkgs; [
               openssl
-            ];
+            ] ++ lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
+              darwin.apple_sdk.frameworks.Security
+            ]);
 
             src = self;
 
-            cargoLock.lockFile = src + "/Cargo.lock";
+            postPatch = ''
+              cp ${./Cargo.lock} Cargo.lock
+            '';
+            cargoLock.lockFile = ./Cargo.lock;
           };
 
           nixos-test = import ./nixos-test.nix { inherit pkgs; inherit (self) nixosModules; } { inherit pkgs system; };
